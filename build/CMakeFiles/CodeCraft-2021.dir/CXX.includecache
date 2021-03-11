@@ -1,0 +1,16 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/singularity/test/HUAWEI/SDK/SDK_C++/CodeCraft-2021/CodeCraft-2021.cpp
+iostream
+-
+string
+-
+map
+-
+
