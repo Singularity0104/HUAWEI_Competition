@@ -3,7 +3,7 @@
 #include <map>
 using namespace std;
 
-#define DEBUG
+// #define DEBUG
 #define MAX_SEVER_NUM 5000
 #define ADD_SEVER_NUM 1000
 
@@ -54,10 +54,6 @@ void print_sort_list();
 
 int main()
 {
-	// TODO:read standard input
-	// TODO:process
-	// TODO:write standard output
-	// TODO:fflush(stdout);
 	cout << "hello" << endl;
 	init_cluster();
 	init_sever_type_list();
