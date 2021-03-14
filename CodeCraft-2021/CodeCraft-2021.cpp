@@ -16,7 +16,8 @@ using namespace std;
 #define NONE 0
 #define NODE_A 1
 #define NODE_B 2
-#define FIT 0.3
+#define FIT 0.5
+#define CHECK_FIT 3
 
 // data structure
 struct server_info
@@ -302,7 +303,7 @@ int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r)
 {
 	server_instance s = server_instance_list[server_instance_id];
 	vm_info v = vm_type_list[vm_type_id];
-	if (abs(server_type_list[s.type_id].cpu_memory - v.cpu_memory) < FIT)
+	if (abs(server_type_list[s.type_id].cpu_memory - v.cpu_memory) < CHECK_FIT)
 	{
 		if (v.is_double_node == 0)
 		{
@@ -355,7 +356,7 @@ int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r)
 		{
 			int node_cpu = v.cpu_core / 2;
 			int node_memory = v.memory / 2;
-			if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_cpu)
+			if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_memory)
 			{
 				vm_instance_map[vm_id].type_id = vm_type_id;
 				vm_instance_map[vm_id].server_id = server_instance_id;
@@ -545,7 +546,7 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 	{
 		int node_cpu = v.cpu_core / 2;
 		int node_memory = v.memory / 2;
-		if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_cpu)
+		if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_memory)
 		{
 			vm_instance_map[vm_id].type_id = vm_type_id;
 			vm_instance_map[vm_id].server_id = server_instance_id;
@@ -656,7 +657,6 @@ void daily_requests(int daily_request_num)
 			{
 				start_index++;
 				start = sort_vm_cpu_memory[start_index];
-				sum = 0;
 			}
 			else
 			{
@@ -682,7 +682,13 @@ void daily_requests(int daily_request_num)
 					{
 						for (int j = start_index; j < i; j++)
 						{
-							server_type_id = find_fit_server(vm_type_list[daily_request_list[sort_request_id[j]].vm_type].cpu_memory, vm_type_list[daily_request_list[sort_request_id[j]].vm_type].cpu_core, vm_type_list[daily_request_list[sort_request_id[j]].vm_type].memory);
+							int find_vm_cpu = vm_type_list[daily_request_list[sort_request_id[j]].vm_type].cpu_core;
+							int find_vm_memory = vm_type_list[daily_request_list[sort_request_id[j]].vm_type].memory;
+							if (vm_type_list[daily_request_list[sort_request_id[j]].vm_type].is_double_node == 0) {
+								find_vm_cpu *= 2;
+								find_vm_memory *= 2;
+							}
+							server_type_id = find_fit_server(vm_type_list[daily_request_list[sort_request_id[j]].vm_type].cpu_memory, find_vm_cpu, find_vm_memory);
 							daily_request_list[sort_request_id[j]].server_type = server_type_id;
 							buying_num[server_type_id] = 0;
 						}
@@ -692,20 +698,38 @@ void daily_requests(int daily_request_num)
 						start_index = i;
 						start = sort_vm_cpu_memory[start_index];
 						sum = start;
-						max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core;
-						max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory;
+						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].is_double_node == 1) {
+							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core;
+							max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory;
+						}
+						else {
+							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core * 2;
+							max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory * 2;
+						}
 					}
 				}
 				else
 				{
 					sum += sort_vm_cpu_memory[i];
-					if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core > max_cpu)
-					{
-						max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core;
+					if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].is_double_node == 1) {
+						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core > max_cpu)
+						{
+							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core;
+						}
+						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory > max_memory)
+						{
+							max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory;
+						}
 					}
-					if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory > max_memory)
-					{
-						max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory;
+					else {
+						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core * 2 > max_cpu)
+						{
+							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core * 2;
+						}
+						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory * 2 > max_memory)
+						{
+							max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory * 2;
+						}
 					}
 				}
 			}
@@ -737,12 +761,15 @@ void daily_requests(int daily_request_num)
 					buy_server(server_type);
 					iter->second++;
 					cur_server_instance = server_instance_num - 1;
-					add_vm(cur_server_instance, daily_request_list[i].vm_type, daily_request_list[i].vm_id, &daily_request_list[i]);
+					flag = add_vm(cur_server_instance, daily_request_list[i].vm_type, daily_request_list[i].vm_id, &daily_request_list[i]);
+					if (flag == 0) {
+						cout << "-----------------------------------------------------------------no add\n";
+					}
 				}
 			}
 		}
 	}
-	cout << "(purchase," << buying_count << ")" << endl;
+	cout << "(purchase, " << buying_count << ")" << endl;
 	for (int i = 0; i < buying_count; i++)
 	{
 		cout << "(" << server_type_list[buying_list[i]].name << ", " << buying_num[buying_list[i]] << ")" << endl;
@@ -755,23 +782,35 @@ void daily_requests(int daily_request_num)
 #endif
 		if (daily_request_list[i].request == ADD_VM)
 		{
-			cout << "(" << daily_request_list[i].server_id;
+			if(daily_request_list[i].sloved == UNSLOVED) {
+				cout << "==========================unsloved\n";
+			}
 			if (daily_request_list[i].node == NODE_A)
 			{
-				cout << ", A)" << endl;
+				cout << "(" << daily_request_list[i].server_id << ", A)" << endl;
+				if(vm_type_list[daily_request_list[i].vm_type].is_double_node == 1) {
+					cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<error\n";
+				}
 			}
 			else if (daily_request_list[i].node == NODE_B)
 			{
-				cout << ", B)" << endl;
+				cout << "(" << daily_request_list[i].server_id << ", B)" << endl;
+				if(vm_type_list[daily_request_list[i].vm_type].is_double_node == 1) {
+					cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<error\n";
+				}
 			}
 			else
 			{
-				cout << ")" << endl;
+				cout << "(" << daily_request_list[i].server_id << ")" << endl;
+				if(vm_type_list[daily_request_list[i].vm_type].is_double_node == 0) {
+					cout << daily_request_list[i].node << endl;
+					cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<error\n";
+				}
 			}
 		}
 		else
 		{
-			delete_vm(tmp_vm_id, &daily_request_list[i]);
+			delete_vm(daily_request_list[i].vm_id, &daily_request_list[i]);
 		}
 	}
 	if (daily_request_list != NULL)
