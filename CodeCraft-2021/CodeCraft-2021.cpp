@@ -16,8 +16,8 @@ using namespace std;
 #define NONE 0
 #define NODE_A 1
 #define NODE_B 2
-#define FIT 0.5
-#define CHECK_FIT 3
+#define FIT 2.4
+#define CHECK_FIT 20
 
 // data structure
 struct server_info
