@@ -4,6 +4,9 @@
 using namespace std;
 
 // #define DEBUG
+// #define DEBUG_POINT
+// #define DAYPOINT
+// #define FILEINPUT
 #define MAX_SERVER_NUM 5000
 #define ADD_SERVER_NUM 1000
 #define SOLOVED 1
@@ -59,6 +62,7 @@ struct request
 };
 
 // cluster data
+int max_server_num;
 int server_type_num;
 int server_instance_num;
 int vm_type_num;
@@ -79,12 +83,13 @@ void init_cluster();
 void init_server_type_list();
 void init_vm_type_list();
 void sort_server();
+void check_cluster(int server_instance_id);
 int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r);
 void delete_vm(int vm_id, request *r);
 int find_fit_server(double vm_cpu_memory, int vm_cpu, int vm_memory);
 void buy_server(int type_id);
 int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r);
-void daily_requests();
+void daily_requests(int daily_request_num);
 void all_requests();
 void delete_cluster();
 #ifdef DEBUG
@@ -94,27 +99,41 @@ void print_sort_list();
 
 int main()
 {
+#ifdef FILEINPUT
+	freopen("../../training-data/training-1.txt", "r", stdin);
+	freopen("../../training-data/training-1-res.txt", "w", stdout);
+#endif
 	init_cluster();
 	init_server_type_list();
 	init_vm_type_list();
 	sort_server();
-	cin >> day_num;
-	all_requests();
 #ifdef DEBUG
 	print_type_list();
 	print_sort_list();
 #endif
+#ifdef DEBUG_POINT
+	cout << "server_type_num: " << server_type_num << endl;
+	cout << "server_instance_num: " << server_instance_num << endl;
+	cout << "vm_type_num: " << vm_type_num << endl;
+	cout << "vm_instance_num: " << vm_instance_num << endl;
+#endif
+	all_requests();
+#ifdef DEBUG_POINT
+	cout << "------------------------------------------------endexec" << endl;
+#endif
 	delete_cluster();
+	fflush(stdout);
 	return 0;
 }
 
 void init_cluster()
 {
+	max_server_num = MAX_SERVER_NUM;
 	server_type_num = 0;
 	server_instance_num = 0;
 	vm_type_num = 0;
 	vm_instance_num = 0;
-	server_instance_list = new server_instance[MAX_SERVER_NUM];
+	server_instance_list = new server_instance[max_server_num];
 }
 
 void init_server_type_list()
@@ -241,13 +260,42 @@ void mergeSort(double *arr, int *arr_index, int len)
 		arr[k] = tmp[k];
 		arr_index[k] = tmp_index[k];
 	}
-	delete[] tmp;
-	delete[] tmp_index;
+	if (tmp != NULL)
+	{
+		delete[] tmp;
+		tmp = NULL;
+	}
+	if (tmp_index != NULL)
+	{
+		delete[] tmp_index;
+		tmp_index = NULL;
+	}
 }
 
 void sort_server()
 {
 	mergeSort(sort_cpu_memory, sort_server_type_id, server_type_num);
+}
+
+void check_cluster(int num) // debug04: 服务器超过初始限制
+{
+	if (num >= max_server_num)
+	{
+		int old = max_server_num;
+		max_server_num += ADD_SERVER_NUM;
+		server_instance *tmp_list = new server_instance[max_server_num];
+		for (int i = 0; i < old; i++)
+		{
+			tmp_list[i] = server_instance_list[i];
+		}
+		delete[] server_instance_list;
+		server_instance_list = new server_instance[max_server_num];
+		for (int i = 0; i < old; i++)
+		{
+			server_instance_list[i] = tmp_list[i];
+		}
+		delete[] tmp_list;
+	}
 }
 
 int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r)
@@ -258,7 +306,27 @@ int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r)
 	{
 		if (v.is_double_node == 0)
 		{
-			if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
+			int select = NONE;
+			if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory && s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+			{
+				if (s.A_cpu_access + s.A_memory_access >= s.B_cpu_access + s.B_memory_access)
+				{
+					select = NODE_A;
+				}
+				else
+				{
+					select = NODE_B;
+				}
+			}
+			else if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
+			{
+				select = NODE_A;
+			}
+			else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+			{
+				select = NODE_B;
+			}
+			if (select == NODE_A)
 			{
 				vm_instance_map[vm_id].type_id = vm_type_id;
 				vm_instance_map[vm_id].server_id = server_instance_id;
@@ -270,7 +338,7 @@ int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r)
 				r->node = NODE_A;
 				return 1;
 			}
-			else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+			else if (select == NODE_B)
 			{
 				vm_instance_map[vm_id].type_id = vm_type_id;
 				vm_instance_map[vm_id].server_id = server_instance_id;
@@ -411,6 +479,7 @@ int find_fit_server(double vm_cpu_memory, int vm_cpu, int vm_memory)
 
 void buy_server(int type_id)
 {
+	check_cluster(server_instance_num);
 	server_instance_list[server_instance_num].type_id = type_id;
 	int node_cpu = server_type_list[type_id].cpu_core / 2;
 	int node_memory = server_type_list[type_id].memory / 2;
@@ -427,7 +496,27 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 	vm_info v = vm_type_list[vm_type_id];
 	if (v.is_double_node == 0)
 	{
-		if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
+		int select = NONE;
+		if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory && s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+		{
+			if (s.A_cpu_access + s.A_memory_access >= s.B_cpu_access + s.B_memory_access)
+			{
+				select = NODE_A;
+			}
+			else
+			{
+				select = NODE_B;
+			}
+		}
+		else if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
+		{
+			select = NODE_A;
+		}
+		else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+		{
+			select = NODE_B;
+		}
+		if (select == NODE_A)
 		{
 			vm_instance_map[vm_id].type_id = vm_type_id;
 			vm_instance_map[vm_id].server_id = server_instance_id;
@@ -439,7 +528,7 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 			r->node = NODE_A;
 			return 1;
 		}
-		else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+		else if (select == NODE_B)
 		{
 			vm_instance_map[vm_id].type_id = vm_type_id;
 			vm_instance_map[vm_id].server_id = server_instance_id;
@@ -475,23 +564,33 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 	return 0;
 }
 
-void daily_requests()
+void daily_requests(int daily_request_num)
 {
-	int daily_request_num;
+#ifdef DEBUG_POINT
+	cout << "daily_request_num: " << daily_request_num << endl;
+#endif
+	if (daily_request_num == 0)
+	{ // debug03: 如果请求为0，依然会进入循环，购买服务器
+		cout << "(purchase,0)" << endl;
+		cout << "(migration, 0)" << endl;
+		return;
+	}
+#ifdef DEBUG_POINT
+	cout << "------------------------------------------------point1" << endl;
+#endif
 	request *daily_request_list;
 	int *sort_request_id;
 	double *sort_vm_cpu_memory;
 	int *buying_list;
 	map<int, int> buying_num;
 	int buying_count = 0;
-	cin >> daily_request_num;
 	daily_request_list = new request[daily_request_num];
 	sort_request_id = new int[daily_request_num];
 	sort_vm_cpu_memory = new double[daily_request_num];
 	buying_list = new int[server_type_num];
 	char tmp_char;
-	int tmp_vm_id;
-	int tmp_type_id;
+	int tmp_vm_id = 0;
+	int tmp_type_id = 0;
 	string tmp_request;
 	string tmp_name;
 	for (int i = 0; i < daily_request_num; i++)
@@ -528,19 +627,29 @@ void daily_requests()
 				}
 			}
 		}
-		else
-		{
-			delete_vm(tmp_vm_id, &daily_request_list[i]);
-		}
 	}
+#ifdef DEBUG_POINT
+	cout << "------------------------------------------------point2" << endl;
+#endif
 	mergeSort(sort_vm_cpu_memory, sort_request_id, daily_request_num);
 	if (sort_vm_cpu_memory[daily_request_num - 1] != 0)
 	{
 		int start_index = 0;
 		double start = sort_vm_cpu_memory[start_index];
 		double sum = 0;
-		int max_cpu = vm_type_list[daily_request_list[sort_request_id[start_index]].vm_type].cpu_core;
-		int max_memory = vm_type_list[daily_request_list[sort_request_id[start_index]].vm_type].memory;
+#ifdef DEBUG_POINT
+		cout << daily_request_num << endl;
+		for (int i = 0; i < daily_request_num; i++)
+		{
+			cout << sort_request_id[i] << ":" << sort_vm_cpu_memory[i] << " ";
+		}
+		cout << endl;
+#endif
+		int max_cpu = 0; // debug02: 如果命令是del，vm_type无初值，出现越界错误
+		int max_memory = 0;
+#ifdef DEBUG_POINT
+		cout << "------------------------------------------------point3" << endl;
+#endif
 		for (int i = 0; i <= daily_request_num; i++)
 		{
 			if (i != daily_request_num && sort_vm_cpu_memory[i] == 0)
@@ -553,9 +662,14 @@ void daily_requests()
 			{
 				if (i == daily_request_num || abs(sort_vm_cpu_memory[i] - start) > FIT)
 				{
+#ifdef DEBUG_POINT
+					cout << "------------------------------------------------point4" << endl;
+#endif
 					double average = sum / (i - start_index);
 					int server_type_id = find_fit_server(average, max_cpu, max_memory);
-
+#ifdef DEBUG_POINT
+					cout << "------------------------------------------------point5" << endl;
+#endif
 					if (server_type_id != -1)
 					{
 						buying_num[server_type_id] = 0;
@@ -573,7 +687,8 @@ void daily_requests()
 							buying_num[server_type_id] = 0;
 						}
 					}
-					if (i < daily_request_num) {
+					if (i < daily_request_num) // debug01: i越界错误
+					{
 						start_index = i;
 						start = sort_vm_cpu_memory[start_index];
 						sum = start;
@@ -596,7 +711,9 @@ void daily_requests()
 			}
 		}
 	}
-
+#ifdef DEBUG_POINT
+	cout << "------------------------------------------------point6" << endl;
+#endif
 	map<int, int>::iterator iter;
 	for (iter = buying_num.begin(); iter != buying_num.end(); iter++)
 	{
@@ -615,7 +732,8 @@ void daily_requests()
 			else if (daily_request_list[i].request == ADD_VM && daily_request_list[i].server_type == server_type)
 			{
 				int flag = add_vm(cur_server_instance, daily_request_list[i].vm_type, daily_request_list[i].vm_id, &daily_request_list[i]);
-				if (flag == 0) {
+				if (flag == 0)
+				{
 					buy_server(server_type);
 					iter->second++;
 					cur_server_instance = server_instance_num - 1;
@@ -625,45 +743,105 @@ void daily_requests()
 		}
 	}
 	cout << "(purchase," << buying_count << ")" << endl;
-	for(int i = 0; i < buying_count; i++) {
+	for (int i = 0; i < buying_count; i++)
+	{
 		cout << "(" << server_type_list[buying_list[i]].name << ", " << buying_num[buying_list[i]] << ")" << endl;
 	}
 	cout << "(migration, 0)" << endl;
-	for (int i = 0; i < daily_request_num; i++) {
-		if(daily_request_list[i].request == ADD_VM) {
+	for (int i = 0; i < daily_request_num; i++)
+	{
+#ifdef DEBUG_POINT
+		cout << daily_request_list[i].vm_id << ":" << endl;
+#endif
+		if (daily_request_list[i].request == ADD_VM)
+		{
 			cout << "(" << daily_request_list[i].server_id;
-			if (daily_request_list[i].node == NODE_A) {
+			if (daily_request_list[i].node == NODE_A)
+			{
 				cout << ", A)" << endl;
 			}
-			else if (daily_request_list[i].node == NODE_B) {
+			else if (daily_request_list[i].node == NODE_B)
+			{
 				cout << ", B)" << endl;
 			}
-			else {
+			else
+			{
 				cout << ")" << endl;
 			}
 		}
+		else
+		{
+			delete_vm(tmp_vm_id, &daily_request_list[i]);
+		}
 	}
-	delete[] daily_request_list;
-	delete[] sort_request_id;
-	delete[] sort_vm_cpu_memory;
-	delete[] buying_list;
+	if (daily_request_list != NULL)
+	{
+		delete[] daily_request_list;
+		daily_request_list = NULL;
+	}
+	if (sort_request_id != NULL)
+	{
+		delete[] sort_request_id;
+		sort_request_id = NULL;
+	}
+	if (sort_vm_cpu_memory != NULL)
+	{
+		delete[] sort_vm_cpu_memory;
+		sort_vm_cpu_memory = NULL;
+	}
+	if (buying_list != NULL)
+	{
+		delete[] buying_list;
+		buying_list = NULL;
+	}
 	buying_num.clear();
 }
 
 void all_requests()
 {
-	for (int i = 0; i < day_num; i++) {
-		daily_requests();
+	cin >> day_num;
+	for (int i = 0; i < day_num; i++)
+	{
+		int daily_request_num = 0;
+		cin >> daily_request_num;
+#ifdef DAYPOINT
+		cout << "------------------------------------------------cin:" << cin.fail() << endl;
+		cout << "------------------------------------------------day" << i << endl;
+#endif
+		daily_requests(daily_request_num);
+#ifdef DAYPOINT
+		cout << "---------------------------------------------endday" << i << endl;
+#endif
 	}
 }
 
 void delete_cluster()
 {
-	delete[] server_type_list;
-	delete[] server_instance_list;
-	delete[] vm_type_list;
-	delete[] sort_cpu_memory;
-	delete[] sort_server_type_id;
+	if (server_type_list != NULL)
+	{
+		delete[] server_type_list;
+		server_type_list = NULL;
+	}
+	if (server_instance_list != NULL)
+	{
+		delete[] server_instance_list;
+		server_instance_list = NULL;
+	}
+	if (vm_type_list != NULL)
+	{
+		delete[] vm_type_list;
+		vm_type_list = NULL;
+	}
+	if (sort_cpu_memory != NULL)
+	{
+		delete[] sort_cpu_memory;
+		sort_cpu_memory = NULL;
+	}
+	if (sort_server_type_id != NULL)
+	{
+		delete[] sort_server_type_id;
+		sort_server_type_id = NULL;
+	}
 }
 
 #ifdef DEBUG
