@@ -3,9 +3,8 @@
 #include <map>
 using namespace std;
 
-// #define DEBUG
 // #define DEBUG_POINT
-// #define DAYPOINT
+// #define PRINTINFO
 // #define FILEINPUT
 #define MAX_SERVER_NUM 5000
 #define ADD_SERVER_NUM 1000
@@ -23,6 +22,7 @@ using namespace std;
 struct server_info
 {
 	string name;
+	int count;
 	int cpu_core;
 	int memory;
 	int device_cost;
@@ -93,9 +93,10 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r);
 void daily_requests(int daily_request_num);
 void all_requests();
 void delete_cluster();
-#ifdef DEBUG
+#ifdef PRINTINFO
 void print_type_list();
 void print_sort_list();
+void print_server_info();
 #endif
 
 int main()
@@ -108,7 +109,7 @@ int main()
 	init_server_type_list();
 	init_vm_type_list();
 	sort_server();
-#ifdef DEBUG
+#ifdef PRINTINFO
 	print_type_list();
 	print_sort_list();
 #endif
@@ -121,6 +122,9 @@ int main()
 	all_requests();
 #ifdef DEBUG_POINT
 	cout << "------------------------------------------------endexec" << endl;
+#endif
+#ifdef PRINTINFO
+	print_server_info();
 #endif
 	delete_cluster();
 	fflush(stdout);
@@ -166,6 +170,7 @@ void init_server_type_list()
 		tmp_cpu_memory = ((double)tmp_cpu) / ((double)tmp_memory);
 		server_type_index[tmp_name] = i;
 		server_type_list[i].name = tmp_name;
+		server_type_list[i].count = 0;
 		server_type_list[i].cpu_core = tmp_cpu;
 		server_type_list[i].memory = tmp_memory;
 		server_type_list[i].device_cost = tmp_device_cost;
@@ -489,6 +494,7 @@ void buy_server(int type_id)
 	server_instance_list[server_instance_num].B_cpu_access = node_cpu;
 	server_instance_list[server_instance_num].B_memory_access = node_memory;
 	server_instance_num++;
+	server_type_list[type_id].count++;
 }
 
 int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
@@ -843,12 +849,12 @@ void all_requests()
 	{
 		int daily_request_num = 0;
 		cin >> daily_request_num;
-#ifdef DAYPOINT
+#ifdef PRINTINFO
 		cout << "------------------------------------------------cin:" << cin.fail() << endl;
 		cout << "------------------------------------------------day" << i << endl;
 #endif
 		daily_requests(daily_request_num);
-#ifdef DAYPOINT
+#ifdef PRINTINFO
 		cout << "---------------------------------------------endday" << i << endl;
 #endif
 	}
@@ -883,7 +889,7 @@ void delete_cluster()
 	}
 }
 
-#ifdef DEBUG
+#ifdef PRINTINFO
 void print_type_list()
 {
 	cout << "debug-print-------------------------------------------" << endl;
@@ -912,5 +918,16 @@ void print_sort_list()
 		cout << sort_cpu_memory[i] << " " << endl;
 	}
 	cout << "------------------------------------------------------" << endl;
+}
+
+void print_server_info() {
+	cout << "----------------------------------nosort" << endl;
+	for (int i = 0; i < server_type_num; i++) {
+		cout << server_type_list[i].name << ": " << server_type_list[i].count << endl;
+	}
+	cout << "------------------------------------sort" << endl;
+	for (int i = 0; i < server_type_num; i++) {
+		cout << server_type_list[sort_server_type_id[i]].name << ": " << server_type_list[sort_server_type_id[i]].count << endl;
+	}
 }
 #endif
