@@ -6,7 +6,7 @@ using namespace std;
 
 // #define DEBUG_POINT
 // #define PRINTINFO
-// #define FILEINPUT
+#define FILEINPUT
 #define MAX_SERVER_NUM 5000
 #define ADD_SERVER_NUM 1000
 #define SOLVED 1
@@ -68,6 +68,11 @@ struct request
 	int server_id;
 	int node;
 };
+struct vm_node
+{
+	int vm_id;
+	vm_node *next;
+};
 
 // cluster data
 int max_server_num;
@@ -78,6 +83,7 @@ int vm_instance_num;
 server_info *server_type_list;
 server_instance *server_instance_list;
 vm_info *vm_type_list;
+vm_node **vm_node_chain;
 map<string, int> server_type_index;
 map<string, int> vm_type_index;
 map<int, vm_instance> vm_instance_map;
@@ -93,6 +99,9 @@ double check_distance;
 int day_num;
 double *sort_cpu_memory;
 int *sort_server_type_id;
+double *sort_server_usage;
+int *sort_server_id;
+
 
 void init_cluster();
 void init_server_type_list();
@@ -101,11 +110,12 @@ void sort_server();
 void check_cluster(int server_instance_id);
 double check_cond(server_instance s, vm_info v, int node);
 int check_and_add(int vm_type_id, int vm_id, request *r);
-int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r);
+// int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r);
 void delete_vm(int vm_id, request *r);
 int find_fit_server(double vm_cpu_memory, int vm_cpu, int vm_memory);
 void buy_server(int type_id);
 int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r);
+int transfer_vm();
 void daily_requests(int daily_request_num);
 void all_requests();
 void fresh(int server_instance_id);
@@ -157,6 +167,13 @@ void init_cluster()
 	vm_type_num = 0;
 	vm_instance_num = 0;
 	server_instance_list = new server_instance[max_server_num];
+	vm_node_chain = new vm_node *[max_server_num];
+	for (int i = 0; i < max_server_num; i++)
+	{
+		vm_node_chain[i] = NULL;
+	}
+	sort_server_usage = new double[max_server_num];
+	sort_server_id = new int[max_server_num];
 	point_cpu_1 = 1 + (CHECK_POINT_OFFSET);
 	point_mem_1 = -(CHECK_POINT_OFFSET);
 	point_cpu_2 = -(CHECK_POINT_OFFSET);
@@ -313,40 +330,57 @@ void check_cluster(int num) // debug04: 服务器超过初始限制
 		int old = max_server_num;
 		max_server_num += ADD_SERVER_NUM;
 		server_instance *tmp_list = new server_instance[max_server_num];
+		vm_node **tmp_chain = new vm_node *[max_server_num];
 		for (int i = 0; i < old; i++)
 		{
 			tmp_list[i] = server_instance_list[i];
+			tmp_chain[i] = vm_node_chain[i];
 		}
 		delete[] server_instance_list;
+		delete[] vm_node_chain;
 		server_instance_list = new server_instance[max_server_num];
-		for (int i = 0; i < old; i++)
+		vm_node_chain = new vm_node *[max_server_num];
+		for (int i = 0; i < max_server_num; i++)
 		{
-			server_instance_list[i] = tmp_list[i];
+			if (i < old) {
+				server_instance_list[i] = tmp_list[i];
+				vm_node_chain[i] = tmp_chain[i];
+			}
+			else {
+				vm_node_chain[i] = NULL;
+			}
 		}
 		delete[] tmp_list;
+		delete[] tmp_chain;
 	}
 }
 
-double check_cond(server_instance s, vm_info v, int node) {
-	if (node == NODE_A) {
+double check_cond(server_instance s, vm_info v, int node)
+{
+	if (node == NODE_A)
+	{
 		double cpu = 1 - (double)(s.A_cpu_access - v.cpu_core) / (double)(server_type_list[s.type_id].cpu_core / 2);
 		double mem = 1 - (double)(s.A_memory_access - v.memory) / (double)(server_type_list[s.type_id].memory / 2);
 		double distance_point_1 = sqrt((point_cpu_1 - cpu) * (point_cpu_1 - cpu) + (mem - point_mem_1) * (mem - point_mem_1));
 		double distance_point_2 = sqrt((point_mem_2 - mem) * (point_mem_2 - mem) + (cpu - point_cpu_2) * (cpu - point_cpu_2));
-		if (distance_point_1 < check_distance && distance_point_2 < check_distance) {
+		if (distance_point_1 < check_distance && distance_point_2 < check_distance)
+		{
 			return cpu + mem;
 		}
 	}
-	else if (node == NODE_B) {
+	else if (node == NODE_B)
+	{
 		double cpu = 1 - (double)(s.B_cpu_access - v.cpu_core) / (double)(server_type_list[s.type_id].cpu_core / 2);
 		double mem = 1 - (double)(s.B_memory_access - v.memory) / (double)(server_type_list[s.type_id].memory / 2);
 		double distance_point_1 = sqrt((1 - cpu) * (1 - cpu) + mem * mem);
 		double distance_point_2 = sqrt((1 - mem) * (1 - mem) + cpu * cpu);
-		if (distance_point_1 < check_distance && distance_point_2 < check_distance) {
+		if (distance_point_1 < check_distance && distance_point_2 < check_distance)
+		{
 			return cpu + mem;
 		}
 	}
-	else {
+	else
+	{
 		double cpu_A = 1 - (double)(s.A_cpu_access - v.cpu_core / 2) / (double)(server_type_list[s.type_id].cpu_core / 2);
 		double mem_A = 1 - (double)(s.A_memory_access - v.memory / 2) / (double)(server_type_list[s.type_id].memory / 2);
 		double cpu_B = 1 - (double)(s.B_cpu_access - v.cpu_core / 2) / (double)(server_type_list[s.type_id].cpu_core / 2);
@@ -355,26 +389,30 @@ double check_cond(server_instance s, vm_info v, int node) {
 		double distance_point_2_A = sqrt((1 - mem_A) * (1 - mem_A) + cpu_A * cpu_A);
 		double distance_point_1_B = sqrt((1 - cpu_B) * (1 - cpu_B) + mem_B * mem_B);
 		double distance_point_2_B = sqrt((1 - mem_B) * (1 - mem_B) + cpu_B * cpu_B);
-		if (distance_point_1_A < check_distance && distance_point_2_A < check_distance && distance_point_1_B < check_distance && distance_point_2_B < check_distance) {
+		if (distance_point_1_A < check_distance && distance_point_2_A < check_distance && distance_point_1_B < check_distance && distance_point_2_B < check_distance)
+		{
 			return cpu_A + mem_A + cpu_B + mem_B;
 		}
 	}
 	return -1;
 }
 
-int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and_add重写，使用几何约束
+int check_and_add(int vm_type_id, int vm_id, request *r)
+{ // debug04 check_and_add重写，使用几何约束
 	int server_instance_id = -1;
 	int node = NONE;
 	double max_distance = 0;
 	vm_info v = vm_type_list[vm_type_id];
-	for (int i = 0; i < server_instance_num; i++) {
+	for (int i = 0; i < server_instance_num; i++)
+	{
 		server_instance s = server_instance_list[i];
 		if (v.is_double_node == 0)
 		{
 			if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
 			{
 				double tmp = check_cond(s, v, NODE_A);
-				if (tmp >= 0 && tmp > max_distance) {
+				if (tmp >= 0 && tmp > max_distance)
+				{
 					max_distance = tmp;
 					server_instance_id = i;
 					node = NODE_A;
@@ -383,7 +421,8 @@ int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and
 			else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
 			{
 				double tmp = check_cond(s, v, NODE_B);
-				if (tmp >= 0 && tmp > max_distance) {
+				if (tmp >= 0 && tmp > max_distance)
+				{
 					max_distance = tmp;
 					server_instance_id = i;
 					node = NODE_B;
@@ -397,7 +436,8 @@ int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and
 			if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_memory)
 			{
 				double tmp = check_cond(s, v, NONE);
-				if (tmp >= 0 && tmp > max_distance) {
+				if (tmp >= 0 && tmp > max_distance)
+				{
 					max_distance = tmp;
 					server_instance_id = i;
 					node = NONE;
@@ -405,7 +445,8 @@ int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and
 			}
 		}
 	}
-	if (server_instance_id != -1) {
+	if (server_instance_id != -1)
+	{
 		if (node == NODE_A)
 		{
 			vm_instance_map[vm_id].type_id = vm_type_id;
@@ -416,6 +457,10 @@ int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and
 			r->solved = SOLVED;
 			r->server_id = server_instance_id;
 			r->node = NODE_A;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
 			return 1;
 		}
 		else if (node == NODE_B)
@@ -428,6 +473,10 @@ int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and
 			r->solved = SOLVED;
 			r->server_id = server_instance_id;
 			r->node = NODE_B;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
 			return 1;
 		}
 		else
@@ -444,6 +493,10 @@ int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and
 			r->solved = SOLVED;
 			r->server_id = server_instance_id;
 			r->node = NONE;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
 			return 1;
 		}
 	}
@@ -451,82 +504,82 @@ int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and
 	return 0;
 }
 
-int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r)
-{
-	server_instance s = server_instance_list[server_instance_id];
-	vm_info v = vm_type_list[vm_type_id];
-	if (abs(server_type_list[s.type_id].cpu_memory - v.cpu_memory) < CHECK_FIT)
-	{
-		if (v.is_double_node == 0)
-		{
-			int select = NONE;
-			if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory && s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
-			{
-				if (s.A_cpu_access + s.A_memory_access >= s.B_cpu_access + s.B_memory_access)
-				{
-					select = NODE_A;
-				}
-				else
-				{
-					select = NODE_B;
-				}
-			}
-			else if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
-			{
-				select = NODE_A;
-			}
-			else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
-			{
-				select = NODE_B;
-			}
-			if (select == NODE_A)
-			{
-				vm_instance_map[vm_id].type_id = vm_type_id;
-				vm_instance_map[vm_id].server_id = server_instance_id;
-				vm_instance_map[vm_id].node = NODE_A;
-				server_instance_list[server_instance_id].A_cpu_access -= v.cpu_core;
-				server_instance_list[server_instance_id].A_memory_access -= v.memory;
-				r->solved = SOLVED;
-				r->server_id = server_instance_id;
-				r->node = NODE_A;
-				return 1;
-			}
-			else if (select == NODE_B)
-			{
-				vm_instance_map[vm_id].type_id = vm_type_id;
-				vm_instance_map[vm_id].server_id = server_instance_id;
-				vm_instance_map[vm_id].node = NODE_B;
-				server_instance_list[server_instance_id].B_cpu_access -= v.cpu_core;
-				server_instance_list[server_instance_id].B_memory_access -= v.memory;
-				r->solved = SOLVED;
-				r->server_id = server_instance_id;
-				r->node = NODE_B;
-				return 1;
-			}
-		}
-		else
-		{
-			int node_cpu = v.cpu_core / 2;
-			int node_memory = v.memory / 2;
-			if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_memory)
-			{
-				vm_instance_map[vm_id].type_id = vm_type_id;
-				vm_instance_map[vm_id].server_id = server_instance_id;
-				vm_instance_map[vm_id].node = NONE;
-				server_instance_list[server_instance_id].A_cpu_access -= node_cpu;
-				server_instance_list[server_instance_id].A_memory_access -= node_memory;
-				server_instance_list[server_instance_id].B_cpu_access -= node_cpu;
-				server_instance_list[server_instance_id].B_memory_access -= node_memory;
-				r->solved = SOLVED;
-				r->server_id = server_instance_id;
-				r->node = NONE;
-				return 1;
-			}
-		}
-	}
-	r->solved = UNSOLVED;
-	return 0;
-}
+// int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r)
+// {
+// 	server_instance s = server_instance_list[server_instance_id];
+// 	vm_info v = vm_type_list[vm_type_id];
+// 	if (abs(server_type_list[s.type_id].cpu_memory - v.cpu_memory) < CHECK_FIT)
+// 	{
+// 		if (v.is_double_node == 0)
+// 		{
+// 			int select = NONE;
+// 			if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory && s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+// 			{
+// 				if (s.A_cpu_access + s.A_memory_access >= s.B_cpu_access + s.B_memory_access)
+// 				{
+// 					select = NODE_A;
+// 				}
+// 				else
+// 				{
+// 					select = NODE_B;
+// 				}
+// 			}
+// 			else if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
+// 			{
+// 				select = NODE_A;
+// 			}
+// 			else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+// 			{
+// 				select = NODE_B;
+// 			}
+// 			if (select == NODE_A)
+// 			{
+// 				vm_instance_map[vm_id].type_id = vm_type_id;
+// 				vm_instance_map[vm_id].server_id = server_instance_id;
+// 				vm_instance_map[vm_id].node = NODE_A;
+// 				server_instance_list[server_instance_id].A_cpu_access -= v.cpu_core;
+// 				server_instance_list[server_instance_id].A_memory_access -= v.memory;
+// 				r->solved = SOLVED;
+// 				r->server_id = server_instance_id;
+// 				r->node = NODE_A;
+// 				return 1;
+// 			}
+// 			else if (select == NODE_B)
+// 			{
+// 				vm_instance_map[vm_id].type_id = vm_type_id;
+// 				vm_instance_map[vm_id].server_id = server_instance_id;
+// 				vm_instance_map[vm_id].node = NODE_B;
+// 				server_instance_list[server_instance_id].B_cpu_access -= v.cpu_core;
+// 				server_instance_list[server_instance_id].B_memory_access -= v.memory;
+// 				r->solved = SOLVED;
+// 				r->server_id = server_instance_id;
+// 				r->node = NODE_B;
+// 				return 1;
+// 			}
+// 		}
+// 		else
+// 		{
+// 			int node_cpu = v.cpu_core / 2;
+// 			int node_memory = v.memory / 2;
+// 			if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_memory)
+// 			{
+// 				vm_instance_map[vm_id].type_id = vm_type_id;
+// 				vm_instance_map[vm_id].server_id = server_instance_id;
+// 				vm_instance_map[vm_id].node = NONE;
+// 				server_instance_list[server_instance_id].A_cpu_access -= node_cpu;
+// 				server_instance_list[server_instance_id].A_memory_access -= node_memory;
+// 				server_instance_list[server_instance_id].B_cpu_access -= node_cpu;
+// 				server_instance_list[server_instance_id].B_memory_access -= node_memory;
+// 				r->solved = SOLVED;
+// 				r->server_id = server_instance_id;
+// 				r->node = NONE;
+// 				return 1;
+// 			}
+// 		}
+// 	}
+// 	r->solved = UNSOLVED;
+// 	return 0;
+// }
 
 void delete_vm(int vm_id, request *r)
 {
@@ -556,7 +609,27 @@ void delete_vm(int vm_id, request *r)
 		server_instance_list[server_id].B_cpu_access += node_cpu;
 		server_instance_list[server_id].B_memory_access += node_memory;
 	}
+	vm_node *p = vm_node_chain[server_id];
+	vm_node *q = NULL;
 	vm_instance_map.erase(vm_id);
+	while (p != NULL)
+	{
+		if (p->vm_id == vm_id) {
+			break;
+		}
+		q = p;
+		p = p->next;
+	}
+	if (q == NULL) {
+		vm_node_chain[server_id] = p->next;
+		delete p;
+		p = NULL;
+	}
+	else {
+		q->next = p->next;
+		delete p;
+		p = NULL;
+	}
 	r->solved = SOLVED;
 }
 
@@ -625,7 +698,8 @@ int find_fit_server(double vm_cpu_memory, int vm_cpu, int vm_memory)
 		{
 			if (server_type_list[i].cpu_core >= vm_cpu && server_type_list[i].memory >= vm_memory)
 			{
-				if (abs(server_type_list[i].cpu_memory - vm_cpu_memory) < fit_value) {
+				if (abs(server_type_list[i].cpu_memory - vm_cpu_memory) < fit_value)
+				{
 					fit_value = abs(server_type_list[i].cpu_memory - vm_cpu_memory);
 					index = i;
 				}
@@ -685,6 +759,10 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 			r->solved = SOLVED;
 			r->server_id = server_instance_id;
 			r->node = NODE_A;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
 			return 1;
 		}
 		else if (select == NODE_B)
@@ -697,6 +775,10 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 			r->solved = SOLVED;
 			r->server_id = server_instance_id;
 			r->node = NODE_B;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
 			return 1;
 		}
 	}
@@ -716,11 +798,19 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 			r->solved = SOLVED;
 			r->server_id = server_instance_id;
 			r->node = NONE;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
 			return 1;
 		}
 	}
 	r->solved = UNSOLVED;
 	return 0;
+}
+
+int transfer_vm() {
+
 }
 
 void daily_requests(int daily_request_num)
@@ -777,7 +867,8 @@ void daily_requests(int daily_request_num)
 		daily_request_list[i].vm_id = tmp_vm_id;
 		if (tmp_request == "add")
 		{
-			if (check_and_add(tmp_type_id, tmp_vm_id, &daily_request_list[i]) == 1) {
+			if (check_and_add(tmp_type_id, tmp_vm_id, &daily_request_list[i]) == 1)
+			{
 				sort_vm_cpu_memory[i] = 0; // todo
 			}
 			// for (int j = 0; j < server_instance_num; j++)
@@ -846,7 +937,8 @@ void daily_requests(int daily_request_num)
 						{
 							int find_vm_cpu = vm_type_list[daily_request_list[sort_request_id[j]].vm_type].cpu_core;
 							int find_vm_memory = vm_type_list[daily_request_list[sort_request_id[j]].vm_type].memory;
-							if (vm_type_list[daily_request_list[sort_request_id[j]].vm_type].is_double_node == 0) {
+							if (vm_type_list[daily_request_list[sort_request_id[j]].vm_type].is_double_node == 0)
+							{
 								find_vm_cpu *= 2;
 								find_vm_memory *= 2;
 							}
@@ -859,13 +951,15 @@ void daily_requests(int daily_request_num)
 					{
 						start_index = i;
 						start = sort_vm_cpu_memory[start_index];
-						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].is_double_node == 1) {
+						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].is_double_node == 1)
+						{
 							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core;
 							max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory;
 							sum_cpu = max_cpu;
 							sum_memory = max_memory;
 						}
-						else {
+						else
+						{
 							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core * 2;
 							max_memory = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory * 2;
 							sum_cpu = max_cpu;
@@ -875,7 +969,8 @@ void daily_requests(int daily_request_num)
 				}
 				else
 				{
-					if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].is_double_node == 1) {
+					if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].is_double_node == 1)
+					{
 						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core > max_cpu)
 						{
 							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core;
@@ -887,7 +982,8 @@ void daily_requests(int daily_request_num)
 						sum_cpu += vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core;
 						sum_memory += vm_type_list[daily_request_list[sort_request_id[i]].vm_type].memory;
 					}
-					else {
+					else
+					{
 						if (vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core * 2 > max_cpu)
 						{
 							max_cpu = vm_type_list[daily_request_list[sort_request_id[i]].vm_type].cpu_core * 2;
@@ -920,14 +1016,17 @@ void daily_requests(int daily_request_num)
 			else if (daily_request_list[i].request == ADD_VM && daily_request_list[i].server_type == server_type)
 			{
 				int flag = 0;
-				if(iter->second > 0) {
+				if (iter->second > 0)
+				{
 					flag = add_vm(cur_server_instance, daily_request_list[i].vm_type, daily_request_list[i].vm_id, &daily_request_list[i]);
 				}
 				if (flag == 0)
 				{
 					int if_solved = check_and_add(daily_request_list[i].vm_type, daily_request_list[i].vm_id, &daily_request_list[i]);
-					if (if_solved == 0) {
-						if (iter->second == 0) {
+					if (if_solved == 0)
+					{
+						if (iter->second == 0)
+						{
 							buying_list[buying_count] = server_type;
 							buying_count++;
 						}
@@ -935,7 +1034,8 @@ void daily_requests(int daily_request_num)
 						iter->second++;
 						cur_server_instance = server_instance_num - 1;
 						flag = add_vm(cur_server_instance, daily_request_list[i].vm_type, daily_request_list[i].vm_id, &daily_request_list[i]);
-						if (flag == 0) {
+						if (flag == 0)
+						{
 							cout << "-----------------------------------------------------------------no add\n";
 						}
 					}
@@ -956,27 +1056,31 @@ void daily_requests(int daily_request_num)
 #endif
 		if (daily_request_list[i].request == ADD_VM)
 		{
-			if(daily_request_list[i].solved == UNSOLVED) {
+			if (daily_request_list[i].solved == UNSOLVED)
+			{
 				cout << "==========================UNSOLVED\n";
 			}
 			if (daily_request_list[i].node == NODE_A)
 			{
 				cout << "(" << daily_request_list[i].server_id << ", A)" << endl;
-				if(vm_type_list[daily_request_list[i].vm_type].is_double_node == 1) {
+				if (vm_type_list[daily_request_list[i].vm_type].is_double_node == 1)
+				{
 					cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<error\n";
 				}
 			}
 			else if (daily_request_list[i].node == NODE_B)
 			{
 				cout << "(" << daily_request_list[i].server_id << ", B)" << endl;
-				if(vm_type_list[daily_request_list[i].vm_type].is_double_node == 1) {
+				if (vm_type_list[daily_request_list[i].vm_type].is_double_node == 1)
+				{
 					cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<error\n";
 				}
 			}
 			else
 			{
 				cout << "(" << daily_request_list[i].server_id << ")" << endl;
-				if(vm_type_list[daily_request_list[i].vm_type].is_double_node == 0) {
+				if (vm_type_list[daily_request_list[i].vm_type].is_double_node == 0)
+				{
 					cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<error\n";
 				}
 			}
@@ -1028,7 +1132,8 @@ void all_requests()
 	}
 }
 
-void fresh(int server_instance_id) {
+void fresh(int server_instance_id)
+{
 	server_instance_list[server_instance_id].A_cpu_usage = (double)(server_type_list[server_instance_list[server_instance_id].type_id].cpu_core / 2 - server_instance_list[server_instance_id].A_cpu_access) / (double)(server_type_list[server_instance_list[server_instance_id].type_id].cpu_core / 2);
 	server_instance_list[server_instance_id].B_cpu_usage = (double)(server_type_list[server_instance_list[server_instance_id].type_id].cpu_core / 2 - server_instance_list[server_instance_id].B_cpu_access) / (double)(server_type_list[server_instance_list[server_instance_id].type_id].cpu_core / 2);
 	server_instance_list[server_instance_id].A_memory_usage = (double)(server_type_list[server_instance_list[server_instance_id].type_id].memory / 2 - server_instance_list[server_instance_id].A_memory_access) / (double)(server_type_list[server_instance_list[server_instance_id].type_id].memory / 2);
@@ -1062,6 +1167,27 @@ void delete_cluster()
 		delete[] sort_server_type_id;
 		sort_server_type_id = NULL;
 	}
+	if (sort_server_usage != NULL) {
+		delete[] sort_server_id;
+		sort_server_usage = NULL;
+	}
+	if (sort_server_id != NULL) {
+		delete[] sort_server_id;
+		sort_server_id = NULL;
+	}
+	for (int i = 0; i < max_server_num; i++)
+	{
+		vm_node *p = vm_node_chain[i];
+		vm_node *q = NULL;
+		while (p != NULL)
+		{
+			q = p;
+			p = p->next;
+			delete q;
+			q = NULL;
+		}
+	}
+	delete[] vm_node_chain;
 }
 
 #ifdef PRINTINFO
@@ -1095,25 +1221,33 @@ void print_sort_list()
 	cout << "------------------------------------------------------" << endl;
 }
 
-void print_server_info() {
+void print_server_info()
+{
 	cout << "----------------------------------nosort" << endl;
-	for (int i = 0; i < server_type_num; i++) {
+	for (int i = 0; i < server_type_num; i++)
+	{
 		cout << server_type_list[i].name << ": " << server_type_list[i].count << endl;
 	}
 	cout << "------------------------------------sort" << endl;
-	for (int i = 0; i < server_type_num; i++) {
+	for (int i = 0; i < server_type_num; i++)
+	{
 		cout << server_type_list[sort_server_type_id[i]].name << ": " << server_type_list[sort_server_type_id[i]].count << endl;
 	}
 }
 
-void print_usage() {
-	for(int i = 0; i < server_instance_num; i++) {
+void print_usage()
+{
+	for (int i = 0; i < server_instance_num; i++)
+	{
 		fresh(i);
 		cout << i << "|| ";
-		cout << "A_cpu: " << server_instance_list[i].A_cpu_usage * 100 << "%" << "  ";
-		cout << "A_mem: " << server_instance_list[i].A_memory_usage * 100 << "%" << "  ";
-		cout << "B_cpu: " << server_instance_list[i].B_cpu_usage * 100 << "%" << "  ";
-		cout << "B_mem: " << server_instance_list[i].B_memory_usage * 100 << "%" <<endl;
+		cout << "A_cpu: " << server_instance_list[i].A_cpu_usage * 100 << "%"
+			 << "  ";
+		cout << "A_mem: " << server_instance_list[i].A_memory_usage * 100 << "%"
+			 << "  ";
+		cout << "B_cpu: " << server_instance_list[i].B_cpu_usage * 100 << "%"
+			 << "  ";
+		cout << "B_mem: " << server_instance_list[i].B_memory_usage * 100 << "%" << endl;
 	}
 }
 
