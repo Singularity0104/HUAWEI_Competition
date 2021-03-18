@@ -5,8 +5,8 @@
 using namespace std;
 
 // #define DEBUG_POINT
-#define PRINTINFO
-#define FILEINPUT
+// #define PRINTINFO
+// #define FILEINPUT
 #define MAX_SERVER_NUM 5000
 #define ADD_SERVER_NUM 1000
 #define SOLVED 1
@@ -18,7 +18,8 @@ using namespace std;
 #define NODE_B 2
 #define FIT 0.4
 #define CHECK_FIT 20
-#define CHECK_DISTANCE 1.0
+#define CHECK_POINT_OFFSET 0
+#define CHECK_DISTANCE_OFFSET 0
 
 // data structure
 struct server_info
@@ -80,6 +81,13 @@ vm_info *vm_type_list;
 map<string, int> server_type_index;
 map<string, int> vm_type_index;
 map<int, vm_instance> vm_instance_map;
+
+// check data
+double point_cpu_1;
+double point_mem_1;
+double point_cpu_2;
+double point_mem_2;
+double check_distance;
 
 // runtime data
 int day_num;
@@ -149,6 +157,11 @@ void init_cluster()
 	vm_type_num = 0;
 	vm_instance_num = 0;
 	server_instance_list = new server_instance[max_server_num];
+	point_cpu_1 = 1 + (CHECK_POINT_OFFSET);
+	point_mem_1 = -(CHECK_POINT_OFFSET);
+	point_cpu_2 = -(CHECK_POINT_OFFSET);
+	point_mem_2 = 1 + (CHECK_POINT_OFFSET);
+	check_distance = sqrt(point_cpu_1 * point_cpu_1 + point_mem_1 * point_mem_1) + (CHECK_DISTANCE_OFFSET);
 }
 
 void init_server_type_list()
@@ -318,9 +331,9 @@ double check_cond(server_instance s, vm_info v, int node) {
 	if (node == NODE_A) {
 		double cpu = 1 - (double)(s.A_cpu_access - v.cpu_core) / (double)(server_type_list[s.type_id].cpu_core / 2);
 		double mem = 1 - (double)(s.A_memory_access - v.memory) / (double)(server_type_list[s.type_id].memory / 2);
-		double distance_point_1 = sqrt((1 - cpu) * (1 - cpu) + mem * mem);
-		double distance_point_2 = sqrt((1 - mem) * (1 - mem) + cpu * cpu);
-		if (distance_point_1 < CHECK_DISTANCE && distance_point_2 < CHECK_DISTANCE) {
+		double distance_point_1 = sqrt((point_cpu_1 - cpu) * (point_cpu_1 - cpu) + (mem - point_mem_1) * (mem - point_mem_1));
+		double distance_point_2 = sqrt((point_mem_2 - mem) * (point_mem_2 - mem) + (cpu - point_cpu_2) * (cpu - point_cpu_2));
+		if (distance_point_1 < check_distance && distance_point_2 < check_distance) {
 			return cpu + mem;
 		}
 	}
@@ -329,7 +342,7 @@ double check_cond(server_instance s, vm_info v, int node) {
 		double mem = 1 - (double)(s.B_memory_access - v.memory) / (double)(server_type_list[s.type_id].memory / 2);
 		double distance_point_1 = sqrt((1 - cpu) * (1 - cpu) + mem * mem);
 		double distance_point_2 = sqrt((1 - mem) * (1 - mem) + cpu * cpu);
-		if (distance_point_1 < CHECK_DISTANCE && distance_point_2 < CHECK_DISTANCE) {
+		if (distance_point_1 < check_distance && distance_point_2 < check_distance) {
 			return cpu + mem;
 		}
 	}
@@ -342,14 +355,14 @@ double check_cond(server_instance s, vm_info v, int node) {
 		double distance_point_2_A = sqrt((1 - mem_A) * (1 - mem_A) + cpu_A * cpu_A);
 		double distance_point_1_B = sqrt((1 - cpu_B) * (1 - cpu_B) + mem_B * mem_B);
 		double distance_point_2_B = sqrt((1 - mem_B) * (1 - mem_B) + cpu_B * cpu_B);
-		if (distance_point_1_A < CHECK_DISTANCE && distance_point_2_A < CHECK_DISTANCE && distance_point_1_B < CHECK_DISTANCE && distance_point_2_B < CHECK_DISTANCE) {
+		if (distance_point_1_A < check_distance && distance_point_2_A < check_distance && distance_point_1_B < check_distance && distance_point_2_B < check_distance) {
 			return cpu_A + mem_A + cpu_B + mem_B;
 		}
 	}
 	return -1;
 }
 
-int check_and_add(int vm_type_id, int vm_id, request *r) {
+int check_and_add(int vm_type_id, int vm_id, request *r) {  // debug04 check_and_add重写，使用几何约束
 	int server_instance_id = -1;
 	int node = NONE;
 	double max_distance = 0;
