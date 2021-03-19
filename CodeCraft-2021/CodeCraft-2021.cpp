@@ -6,7 +6,7 @@ using namespace std;
 
 // #define DEBUG_POINT
 // #define PRINTINFO
-#define FILEINPUT
+// #define FILEINPUT
 #define MAX_SERVER_NUM 5000
 #define ADD_SERVER_NUM 1000
 #define SOLVED 1
@@ -20,6 +20,7 @@ using namespace std;
 #define CHECK_FIT 20
 #define CHECK_POINT_OFFSET 0
 #define CHECK_DISTANCE_OFFSET 0
+#define UNACTIVE 1
 
 // data structure
 struct server_info
@@ -68,11 +69,21 @@ struct request
 	int server_id;
 	int node;
 };
+
 struct vm_node
 {
 	int vm_id;
 	vm_node *next;
 };
+
+struct transfer
+{
+	int vm_id;
+	int server_id;
+	int node;
+	transfer *next;
+};
+
 
 // cluster data
 int max_server_num;
@@ -101,6 +112,7 @@ double *sort_cpu_memory;
 int *sort_server_type_id;
 double *sort_server_usage;
 int *sort_server_id;
+transfer trans_order_head;
 
 
 void init_cluster();
@@ -109,8 +121,10 @@ void init_vm_type_list();
 void sort_server();
 void check_cluster(int server_instance_id);
 double check_cond(server_instance s, vm_info v, int node);
+int check_and_add(int vm_type_id, int vm_id, int start_sort_index);
 int check_and_add(int vm_type_id, int vm_id, request *r);
 // int check_and_add(int server_instance_id, int vm_type_id, int vm_id, request *r);
+void delete_vm(int vm_id, vm_instance v);
 void delete_vm(int vm_id, request *r);
 int find_fit_server(double vm_cpu_memory, int vm_cpu, int vm_memory);
 void buy_server(int type_id);
@@ -174,6 +188,7 @@ void init_cluster()
 	}
 	sort_server_usage = new double[max_server_num];
 	sort_server_id = new int[max_server_num];
+	trans_order_head.next = NULL;
 	point_cpu_1 = 1 + (CHECK_POINT_OFFSET);
 	point_mem_1 = -(CHECK_POINT_OFFSET);
 	point_cpu_2 = -(CHECK_POINT_OFFSET);
@@ -331,20 +346,30 @@ void check_cluster(int num) // debug04: 服务器超过初始限制
 		max_server_num += ADD_SERVER_NUM;
 		server_instance *tmp_list = new server_instance[max_server_num];
 		vm_node **tmp_chain = new vm_node *[max_server_num];
+		double *tmp_sort_usage = new double[max_server_num];
+		int *tmp_sort_id = new int[max_server_num];
 		for (int i = 0; i < old; i++)
 		{
 			tmp_list[i] = server_instance_list[i];
 			tmp_chain[i] = vm_node_chain[i];
+			tmp_sort_usage[i] = sort_server_usage[i];
+			tmp_sort_id[i] = sort_server_id[i];
 		}
 		delete[] server_instance_list;
 		delete[] vm_node_chain;
+		delete[] sort_server_usage;
+		delete[] sort_server_id;
 		server_instance_list = new server_instance[max_server_num];
 		vm_node_chain = new vm_node *[max_server_num];
+		sort_server_usage = new double[max_server_num];
+		sort_server_id = new int[max_server_num];
 		for (int i = 0; i < max_server_num; i++)
 		{
 			if (i < old) {
 				server_instance_list[i] = tmp_list[i];
 				vm_node_chain[i] = tmp_chain[i];
+				sort_server_usage[i] = tmp_sort_usage[i];
+				sort_server_id[i] = tmp_sort_id[i];
 			}
 			else {
 				vm_node_chain[i] = NULL;
@@ -352,6 +377,8 @@ void check_cluster(int num) // debug04: 服务器超过初始限制
 		}
 		delete[] tmp_list;
 		delete[] tmp_chain;
+		delete[] tmp_sort_usage;
+		delete[] tmp_sort_id;
 	}
 }
 
@@ -395,6 +422,103 @@ double check_cond(server_instance s, vm_info v, int node)
 		}
 	}
 	return -1;
+}
+
+int check_and_add(int vm_type_id, int vm_id, int start_sort_index)
+{ // 用于迁移
+	int server_instance_id = -1;
+	int node = NONE;
+	double max_distance = 0;
+	vm_info v = vm_type_list[vm_type_id];
+	for (int i = start_sort_index; i < server_instance_num; i++)
+	{
+		server_instance s = server_instance_list[sort_server_id[i]];
+		if (v.is_double_node == 0)
+		{
+			if (s.A_cpu_access >= v.cpu_core && s.A_memory_access >= v.memory)
+			{
+				double tmp = check_cond(s, v, NODE_A);
+				if (tmp >= 0 && tmp > max_distance)
+				{
+					max_distance = tmp;
+					server_instance_id = sort_server_id[i];
+					node = NODE_A;
+				}
+			}
+			else if (s.B_cpu_access >= v.cpu_core && s.B_memory_access >= v.memory)
+			{
+				double tmp = check_cond(s, v, NODE_B);
+				if (tmp >= 0 && tmp > max_distance)
+				{
+					max_distance = tmp;
+					server_instance_id = sort_server_id[i];
+					node = NODE_B;
+				}
+			}
+		}
+		else
+		{
+			int node_cpu = v.cpu_core / 2;
+			int node_memory = v.memory / 2;
+			if (s.A_cpu_access >= node_cpu && s.A_memory_access >= node_memory && s.B_cpu_access >= node_cpu && s.B_memory_access >= node_memory)
+			{
+				double tmp = check_cond(s, v, NONE);
+				if (tmp >= 0 && tmp > max_distance)
+				{
+					max_distance = tmp;
+					server_instance_id = sort_server_id[i];
+					node = NONE;
+				}
+			}
+		}
+	}
+	if (server_instance_id != -1)
+	{
+		if (node == NODE_A)
+		{
+			vm_instance_map[vm_id].type_id = vm_type_id;
+			vm_instance_map[vm_id].server_id = server_instance_id;
+			vm_instance_map[vm_id].node = NODE_A;
+			server_instance_list[server_instance_id].A_cpu_access -= v.cpu_core;
+			server_instance_list[server_instance_id].A_memory_access -= v.memory;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
+			return 1;
+		}
+		else if (node == NODE_B)
+		{
+			vm_instance_map[vm_id].type_id = vm_type_id;
+			vm_instance_map[vm_id].server_id = server_instance_id;
+			vm_instance_map[vm_id].node = NODE_B;
+			server_instance_list[server_instance_id].B_cpu_access -= v.cpu_core;
+			server_instance_list[server_instance_id].B_memory_access -= v.memory;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
+			return 1;
+		}
+		else
+		{
+			int node_cpu = v.cpu_core / 2;
+			int node_memory = v.memory / 2;
+			vm_instance_map[vm_id].type_id = vm_type_id;
+			vm_instance_map[vm_id].server_id = server_instance_id;
+			vm_instance_map[vm_id].node = NONE;
+			server_instance_list[server_instance_id].A_cpu_access -= node_cpu;
+			server_instance_list[server_instance_id].A_memory_access -= node_memory;
+			server_instance_list[server_instance_id].B_cpu_access -= node_cpu;
+			server_instance_list[server_instance_id].B_memory_access -= node_memory;
+			vm_node *new_vm = new vm_node;
+			new_vm->vm_id = vm_id;
+			new_vm->next = vm_node_chain[server_instance_id];
+			vm_node_chain[server_instance_id] = new_vm;
+			return 1;
+		}
+	}
+	return 0;
 }
 
 int check_and_add(int vm_type_id, int vm_id, request *r)
@@ -581,6 +705,55 @@ int check_and_add(int vm_type_id, int vm_id, request *r)
 // 	return 0;
 // }
 
+void delete_vm(int vm_id, vm_instance v)
+{  //用于迁移
+	int server_id = v.server_id;
+	int server_node = v.node;
+	int vm_type = v.type_id;
+	vm_info v_i = vm_type_list[vm_type];
+	int cpu = v_i.cpu_core;
+	int memory = v_i.memory;
+	if (server_node == NODE_A)
+	{
+		server_instance_list[server_id].A_cpu_access += cpu;
+		server_instance_list[server_id].A_memory_access += memory;
+	}
+	else if (server_node == NODE_B)
+	{
+		server_instance_list[server_id].B_cpu_access += cpu;
+		server_instance_list[server_id].B_memory_access += memory;
+	}
+	else
+	{
+		int node_cpu = cpu / 2;
+		int node_memory = memory / 2;
+		server_instance_list[server_id].A_cpu_access += node_cpu;
+		server_instance_list[server_id].A_memory_access += node_memory;
+		server_instance_list[server_id].B_cpu_access += node_cpu;
+		server_instance_list[server_id].B_memory_access += node_memory;
+	}
+	vm_node *p = vm_node_chain[server_id];
+	vm_node *q = NULL;
+	while (p != NULL)
+	{
+		if (p->vm_id == vm_id) {
+			break;
+		}
+		q = p;
+		p = p->next;
+	}
+	if (q == NULL) {
+		vm_node_chain[server_id] = p->next;
+		delete p;
+		p = NULL;
+	}
+	else {
+		q->next = p->next;
+		delete p;
+		p = NULL;
+	}
+}
+
 void delete_vm(int vm_id, request *r)
 {
 	vm_instance v = vm_instance_map[vm_id];
@@ -611,7 +784,6 @@ void delete_vm(int vm_id, request *r)
 	}
 	vm_node *p = vm_node_chain[server_id];
 	vm_node *q = NULL;
-	vm_instance_map.erase(vm_id);
 	while (p != NULL)
 	{
 		if (p->vm_id == vm_id) {
@@ -630,6 +802,7 @@ void delete_vm(int vm_id, request *r)
 		delete p;
 		p = NULL;
 	}
+	vm_instance_map.erase(vm_id);
 	r->solved = SOLVED;
 }
 
@@ -810,7 +983,52 @@ int add_vm(int server_instance_id, int vm_type_id, int vm_id, request *r)
 }
 
 int transfer_vm() {
-
+	transfer *tail = &trans_order_head;
+	int trans_num = 0;
+	if (trans_num + 1 > vm_instance_num * 5 / 1000) {
+		return 0;
+	}
+	for (int i = 0; i < server_instance_num; i++) {
+		fresh(i);
+		sort_server_id[i] = i;
+		sort_server_usage[i] = (server_instance_list[i].A_cpu_usage + server_instance_list[i].A_memory_usage + server_instance_list[i].B_cpu_usage + server_instance_list[i].B_memory_usage) / 4.0;
+	}
+	mergeSort(sort_server_usage, sort_server_id, server_instance_num);
+	int stop = 0;
+	for(int i = 0; i < server_instance_num; i++) {
+		if (stop == 1 || sort_server_usage[i] > UNACTIVE) {
+			break;
+		}
+		if (sort_server_usage[i] == 0) {
+			continue;
+		}
+		int server_id = sort_server_id[i];
+		vm_node *p = vm_node_chain[server_id];
+		while (p != NULL)
+		{
+			int vm_id = p->vm_id;
+			p = p->next;
+			vm_instance old_vm = vm_instance_map[vm_id];
+			int vm_type = old_vm.type_id;
+			int flag = check_and_add(vm_type, vm_id, i + 1);
+			if (flag == 1) {
+				delete_vm(vm_id, old_vm);
+				trans_num++;
+				transfer *new_t = new transfer;
+				new_t->vm_id = vm_id;
+				new_t->server_id = vm_instance_map[vm_id].server_id;
+				new_t->node = vm_instance_map[vm_id].node;
+				new_t->next = NULL;
+				tail->next = new_t;
+				tail = new_t;
+				if (trans_num + 1 > vm_instance_num * 5 / 1000) {
+					stop = 1;
+					break;
+				}
+			}
+		}
+	}
+	return trans_num;
 }
 
 void daily_requests(int daily_request_num)
@@ -827,6 +1045,7 @@ void daily_requests(int daily_request_num)
 #ifdef DEBUG_POINT
 	cout << "------------------------------------------------point1" << endl;
 #endif
+	int trans = transfer_vm();
 	request *daily_request_list;
 	int *sort_request_id;
 	double *sort_vm_cpu_memory;
@@ -850,6 +1069,7 @@ void daily_requests(int daily_request_num)
 		tmp_request.pop_back();
 		if (tmp_request == "add")
 		{
+			vm_instance_num++;
 			daily_request_list[i].request = ADD_VM;
 			cin >> tmp_name;
 			tmp_name.pop_back();
@@ -1048,7 +1268,25 @@ void daily_requests(int daily_request_num)
 	{
 		cout << "(" << server_type_list[buying_list[i]].name << ", " << buying_num[buying_list[i]] << ")" << endl;
 	}
-	cout << "(migration, 0)" << endl;
+	cout << "(migration, " << trans << ")" << endl;
+	transfer *head = trans_order_head.next;
+	trans_order_head.next = NULL;
+	transfer *del = NULL;
+	while(head != NULL) {
+		if(head->node == NODE_A) {
+			cout << "(" << head->vm_id << ", " << head->server_id << ", A)" << endl;
+		}
+		else if(head->node == NODE_B) {
+			cout << "(" << head->vm_id << ", " << head->server_id << ", B)" << endl;
+		}
+		else {
+			cout << "(" << head->vm_id << ", " << head->server_id << ")" << endl;
+		}
+		del = head;
+		head = head->next;
+		delete del;
+		del = NULL;
+	}
 	for (int i = 0; i < daily_request_num; i++)
 	{
 #ifdef DEBUG_POINT
@@ -1088,6 +1326,7 @@ void daily_requests(int daily_request_num)
 		else
 		{
 			delete_vm(daily_request_list[i].vm_id, &daily_request_list[i]);
+			vm_instance_num--;
 		}
 	}
 	if (daily_request_list != NULL)
@@ -1168,7 +1407,7 @@ void delete_cluster()
 		sort_server_type_id = NULL;
 	}
 	if (sort_server_usage != NULL) {
-		delete[] sort_server_id;
+		delete[] sort_server_usage;
 		sort_server_usage = NULL;
 	}
 	if (sort_server_id != NULL) {
@@ -1186,8 +1425,12 @@ void delete_cluster()
 			delete q;
 			q = NULL;
 		}
+		cout << endl;
 	}
-	delete[] vm_node_chain;
+	if (vm_node_chain != NULL) {
+		delete[] vm_node_chain;
+		vm_node_chain = NULL;
+	}
 }
 
 #ifdef PRINTINFO
